@@ -478,6 +478,12 @@
                 "path": "testing/Cellular-Modems.md",
                 "children": [
                   {
+                    "categoryName": "RM520N-GL",
+                    "isCategory": false,
+                    "path": "testing/RM520N-GL.md",
+                    "children": []
+                  },
+                  {
                     "categoryName": "RM530N-GL",
                     "isCategory": false,
                     "path": "testing/RM530N-GL.md",
