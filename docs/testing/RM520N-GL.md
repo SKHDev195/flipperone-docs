@@ -26,6 +26,7 @@ The Quectel RM520N-GL is a 5G Sub-6 GHz M.2 modem. Flipper One detects it over U
 | Module temperature | ✅ | 44–47 °C during the test, no heatsink |
 | GNSS | ⚠️ | engine starts and outputs NMEA through `gps-unmanaged`; no satellites in 5 min indoors. ModemManager's QMI GNSS modes fail, see [GNSS](#gnss) |
 | rfkill (W_DISABLE1# / W_DISABLE2#) | ⏳ | switches exist, behaviour not tested |
+| PCIe mode | ⚠️ | data works over PCIe Gen 2 ×1, but only with a runtime driver workaround, see [PCIe mode](#pcie-mode) |
 
 ## Module specifications
 
@@ -432,6 +433,99 @@ ModemManager numbers modems in the order it finds them (`Modem/0`, `Modem/1`, �
 | Network interface | `ip link`, e.g. `wwu1u4i4` | The modem stays in the same M.2 slot |
 
 `mmcli -m` accepts the UID as well as the index. For a NetworkManager connection that must always use the same modem, set `gsm.device-id` or `gsm.sim-id` on the connection.
+
+## PCIe mode
+
+By default the modem uses USB. It can also send data over PCIe: the M.2 slot carries one PCIe 2.1 lane. That lane uses the same pins as SATA, so PCIe is not available when the SATA overlay (`rk3576-flipper-one-sata.dtbo`) is enabled.
+
+:::hint{type="warning"}
+On the current kernel, data over PCIe works only after the runtime workaround below. Without it the modem registers on the network, but the data connection hangs in `connecting`.
+:::
+
+### Switch to PCIe
+
+1. Enable [ModemManager debug mode](#at-commands) to send AT commands.
+2. Move the data path to PCIe and enable MBIM over PCIe. Diagnostics stay on USB.
+   ```bash
+   sudo mmcli -m any --command='AT+QCFG="data_interface",1,0'
+   sudo mmcli -m any --command='AT+QCFG="pcie_mbim",1'
+   ```
+3. Restart the modem:
+   ```bash
+   sudo mmcli -m any --command='AT+CFUN=1,1'
+   ```
+4. Reboot Flipper One. The PCIe controller only looks for devices at boot and cannot rescan later.
+
+Both settings are stored in the modem and survive power cycles. The defaults on the test unit were `data_interface 0,0`, `pcie_mbim 0` and `pcie/mode 0` (endpoint mode, which is correct for Flipper One).
+
+To switch back to USB, the USB AT ports are still available in PCIe mode:
+
+```bash
+sudo mmcli -m any --command='AT+QCFG="data_interface",0,0'
+sudo mmcli -m any --command='AT+QCFG="pcie_mbim",0'
+sudo mmcli -m any --command='AT+CFUN=1,1'
+```
+
+### What the system shows
+
+```text
+$ lspci -nn
+01:00.0 Unassigned class [ff00]: Qualcomm Technologies, Inc SDX62 [Snapdragon X62 5G] [17cb:0308]
+
+$ sudo dmesg | grep pcie
+rockchip-dw-pcie 22000000.pcie: PCIe Gen.2 x1 link up
+```
+
+| Parameter | Value |
+|---|---|
+| PCI ID | `17cb:0308`, subsystem `17cb:5201` |
+| Link | 5 GT/s (Gen 2) ×1. The module supports 16 GT/s ×2, so Flipper One's single Gen 2 lane is the limit. |
+| Kernel driver | `mhi-pci-generic` (MHI bus) |
+
+In PCIe mode the modem still shows up on USB, but only with four interfaces: DIAG, NMEA (`ttyUSB1`) and two AT ports. The USB data interface (`qmi_wwan`) is gone.
+
+### Driver workaround
+
+The kernel's `mhi-pci-generic` driver picks a channel layout by PCI ID. It knows the RM520N-GL only by Quectel's IDs (`1eac:1004`, `1eac:1007`). This module reports Qualcomm's generic ID, so the driver uses the generic `qcom-sdx65m` profile. That profile hands the data channel to the raw-IP driver (`mhi_net`), while the modem sends MBIM-framed data, which only `mhi_wwan_mbim` understands.
+
+Until the kernel has this ID, add it to the Quectel profile at runtime and rebind the modem. This lasts until the next reboot:
+
+```bash
+D=/sys/bus/pci/drivers/mhi-pci-generic
+A=$(sudo awk '$3=="mhi_quectel_rm5xx_info"{print $1}' /proc/kallsyms)
+echo "17cb 0308 17cb 5201 0 0 $A" | sudo tee $D/new_id
+echo 0000:01:00.0 | sudo tee $D/unbind
+echo 0000:01:00.0 | sudo tee $D/bind
+```
+
+The permanent fix is a kernel patch that adds `PCI_DEVICE_SUB(PCI_VENDOR_ID_QCOM, 0x0308, PCI_VENDOR_ID_QCOM, 0x5201)` with `mhi_quectel_rm5xx_info` to `drivers/bus/mhi/host/pci_generic.c`.
+
+### Interfaces with the Quectel profile
+
+| Linux device | Function | ModemManager role |
+|---|---|---|
+| `/dev/wwan0mbim0` | MBIM control | `mbim` (primary) |
+| `/dev/wwan0at0` | AT commands | `at` |
+| `/dev/wwan0qcdm0` | Qualcomm diagnostics | ignored |
+| `wwan0` | Data network interface (`mhi_wwan_mbim`) | `net` |
+
+The NMEA channel fails to start (`mhi_wwan_ctrl mhi0_NMEA: probe with driver mhi_wwan_ctrl failed with error -95`). GNSS NMEA is still available on the USB port `ttyUSB1`.
+
+### PCIe results on the test unit
+
+Measured on 2026-10-20 with Vodafone UK, indoors, the same weak signal as the USB tests:
+
+| Test | Result |
+|---|---|
+| Data connection | Connected, `wwan0` got an IPv4 address |
+| Ping 1.1.1.1 | 4/4 replies, 30–44 ms |
+| 25 s download | 0.42 MB/s (USB: 0.38 MB/s). Limited by the signal, not the bus. |
+| Per-antenna AT commands | Work. `AT+QRSRP` reported an `NR5G` measurement. |
+
+### Known issues
+
+- **ModemManager lists the modem twice.** One entry uses PCIe (MBIM, `wwan0at0`), the other the leftover USB AT ports. Both control the same radio. Ignoring the USB ports in PCIe mode needs a udev rule, which has not been tested yet.
+- **Cellular becomes the default route.** In PCIe mode the cellular default route got metric 100, lower than Ethernet's 101, so all traffic goes over cellular. Set `ipv4.route-metric` on the cellular connection if Ethernet or Wi-Fi should stay preferred.
 
 ## Software stack
 
