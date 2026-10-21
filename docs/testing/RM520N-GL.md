@@ -11,10 +11,10 @@ The Quectel RM520N-GL is a 5G Sub-6 GHz M.2 modem. Flipper One detects it over U
 
 | Document | Contents |
 |---|---|
-| [RM520N Series 5G Module Specification V1.6](/files/datasheets/RM520N-GL/Quectel_RM520N_Series_5G_Module_Specification_V1.6.pdf) | Key features, bands, data rates, interfaces |
-| [RM520N Series Reference Design V1.2](/files/datasheets/RM520N-GL/quectel_rm520n_series_reference_design_v1-2.pdf) | Quectel's reference design for the module |
-| [RG520N, RG525F, RG5x0F, RM5x0N Series AT Commands Manual V1.1](/files/datasheets/RM520N-GL/quectel_rg520nrg525frg5x0frm5x0n_series_at_commands_manual_v1-1.pdf) | AT command reference for the RM520N and related Quectel 5G modules |
-| [5G-M2 EVB User Guide V1.1](/files/datasheets/RM520N-GL/quectel_5g-m2_evb_user_guide_v1-1.pdf) | Quectel's evaluation board for 5G M.2 modules |
+| [RM520N Series 5G Module Specification V1.6](https://github.com/flipperdevices/flipperone-docs/blob/public-release/docs/files/datasheets/RM520N-GL/Quectel_RM520N_Series_5G_Module_Specification_V1.6.pdf) | Key features, bands, data rates, interfaces |
+| [RM520N Series Reference Design V1.2](https://github.com/flipperdevices/flipperone-docs/blob/public-release/docs/files/datasheets/RM520N-GL/quectel_rm520n_series_reference_design_v1-2.pdf) | Quectel's reference design for the module |
+| [RG520N, RG525F, RG5x0F, RM5x0N Series AT Commands Manual V1.1](https://github.com/flipperdevices/flipperone-docs/blob/public-release/docs/files/datasheets/RM520N-GL/quectel_rg520nrg525frg5x0frm5x0n_series_at_commands_manual_v1-1.pdf) | AT command reference for the RM520N and related Quectel 5G modules |
+| [5G-M2 EVB User Guide V1.1](https://github.com/flipperdevices/flipperone-docs/blob/public-release/docs/files/datasheets/RM520N-GL/quectel_5g-m2_evb_user_guide_v1-1.pdf) | Quectel's evaluation board for 5G M.2 modules |
 | [RM520N Series Hardware Design V1.3](https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/6382/Quectel_RM520N_Series_Hardware_Design_V1.3.pdf) | Pinout, antenna connectors and their bands, RF and electrical characteristics. Hosted by Digi-Key. |
 
 ## Status
@@ -64,7 +64,7 @@ The Quectel RM520N-GL is a 5G Sub-6 GHz M.2 modem. Flipper One detects it over U
 | Hardware revision | `20000` |
 | Carrier config (MBN) | `UK-VoLTE-Vodafone`, revision `0A010426` (selected automatically from the SIM) |
 
-Module data is from the [RM520N Series 5G Module Specification V1.6](/files/datasheets/RM520N-GL/Quectel_RM520N_Series_5G_Module_Specification_V1.6.pdf). Peak data rates are theoretical. Firmware, hardware revision and carrier config were read from the test unit.
+Module data is from the [RM520N Series 5G Module Specification V1.6](https://github.com/flipperdevices/flipperone-docs/blob/public-release/docs/files/datasheets/RM520N-GL/Quectel_RM520N_Series_5G_Module_Specification_V1.6.pdf). Peak data rates are theoretical. Firmware, hardware revision and carrier config were read from the test unit.
 
 ### Supported bands
 
@@ -313,7 +313,7 @@ sudo systemctl start ModemManager
 ```
 
 :::hint{type="info"}
-`AT+QTEMP`, `AT+QGMR`, `AT+QCFG="pcie_mbim"` and `AT+QGPSCFG` are not described in the [AT Commands Manual V1.1](/files/datasheets/RM520N-GL/quectel_rg520nrg525frg5x0frm5x0n_series_at_commands_manual_v1-1.pdf). Their use on this page is based on how the test unit responded.
+`AT+QTEMP`, `AT+QGMR`, `AT+QCFG="pcie_mbim"` and `AT+QGPSCFG` are not described in the [AT Commands Manual V1.1](https://github.com/flipperdevices/flipperone-docs/blob/public-release/docs/files/datasheets/RM520N-GL/quectel_rg520nrg525frg5x0frm5x0n_series_at_commands_manual_v1-1.pdf). Their use on this page is based on how the test unit responded.
 :::
 
 ## Per-antenna signal
