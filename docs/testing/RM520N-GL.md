@@ -35,7 +35,7 @@ The Quectel RM520N-GL is a 5G Sub-6 GHz M.2 modem. Flipper One detects it over U
 | Per-antenna signal | ✅ | all four receive paths work on B1. Low bands such as B20 use only two, see [Per-antenna signal](#per-antenna-signal) |
 | Module temperature | ✅ | 44–47 °C during the test, no heatsink |
 | GNSS | ⚠️ | engine starts and outputs NMEA through `gps-unmanaged`; no satellites in 5 min indoors. ModemManager's QMI GNSS modes fail, see [GNSS](#gnss) |
-| rfkill (W_DISABLE1# / W_DISABLE2#) | ⏳ | switches exist, behaviour not tested |
+| rfkill (W_DISABLE1# / W_DISABLE2#) | ⚠️ | W_DISABLE1 turns cellular off, W_DISABLE2 turns GNSS off, but NetworkManager treats both as cellular kill switches, see [rfkill switches](#rfkill-switches) |
 | PCIe mode | ⚠️ | data works over PCIe Gen 2 ×1, but only with a runtime driver workaround, see [PCIe mode](#pcie-mode) |
 
 ## Module specifications
@@ -514,7 +514,7 @@ GNSS L1 is received on ANT3 and L5 on ANT1 (see [What each connector does](#what
 
 ## rfkill switches
 
-Flipper One has two rfkill switches for the M.2 modem, one for each M.2 radio-disable line:
+Flipper One has two rfkill switches for the M.2 slot. Each one drives one of the M.2 disable lines through a GPIO:
 
 ```text
 $ rfkill -o ID,TYPE,DEVICE,SOFT,HARD
@@ -524,20 +524,42 @@ ID TYPE DEVICE                    SOFT      HARD
  2 wwan M.2 WWAN (WDISABLE2) unblocked unblocked
 ```
 
-| rfkill device | M.2 signal |
-|---|---|
-| `M.2 WWAN` | `W_DISABLE1#` |
-| `M.2 WWAN (WDISABLE2)` | `W_DISABLE2#` |
+| rfkill device | M.2 signal | GPIO | What the RM520N-GL does when blocked |
+|---|---|---|---|
+| `M.2 WWAN` (ID 1) | `W_DISABLE1#`, pin 8 | `gpio2 PB4` | Airplane mode: cellular radio off |
+| `M.2 WWAN (WDISABLE2)` (ID 2) | `W_DISABLE2#`, pin 26 | `gpio4 PA0` | GNSS off. Cellular keeps working. |
 
-There are three different ways to turn the modem radio off:
+Blocking a switch drives its line LOW, unblocking drives it HIGH. Both lines are active LOW and pulled up inside the module (section 4.4 of the [hardware design guide](https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/6382/Quectel_RM520N_Series_Hardware_Design_V1.3.pdf)).
+
+### Test results
+
+Tested on 2026-10-21 with Ethernet as the default route, so the test did not cut off the SSH session.
+
+**W_DISABLE1# (`sudo rfkill block 1`):**
+
+1. NetworkManager reported `rfkill: WWAN now disabled by radio killswitch` and had ModemManager disable the modem. Within 1 s the modem was in low-power mode and detached, and the data link was down.
+2. While the line was LOW, `sudo mmcli -m any --enable` failed with `Couldn't set operating mode: QMI protocol error (4): 'Aborted'`. The module itself keeps the radio off, as the hardware design guide describes.
+3. After `sudo rfkill unblock 1`, the modem registered within 2 s and the data connection was back after 3 s, with a new IP address.
+
+**W_DISABLE2# (`sudo rfkill block 2`), with GNSS running:**
+
+1. NMEA output on `ttyUSB1` stopped.
+2. NetworkManager also reported `WWAN now disabled by radio killswitch` and disabled cellular data, although this line only controls GNSS.
+3. While the line was LOW, `sudo mmcli -m any --enable` worked and the modem registered on LTE and 5G NR, so the line does not affect the cellular radio. GNSS stayed silent even after it was started again.
+4. After `sudo rfkill unblock 2`, cellular data was back within 7 s. GNSS did not restart by itself.
+
+### rfkill known issues
+
+- **The GNSS switch also turns off cellular data.** Both switches are registered with rfkill type `wwan`, so NetworkManager treats either one as a cellular kill switch. Registering the W_DISABLE2 switch as type `gps` (`radio-type = "gps"` in the device tree node `rfkill-m2-wdisable2`) should stop this. Not tested yet.
+- **GNSS does not recover after W_DISABLE2# is released.** ModemManager still lists `gps-unmanaged` as enabled, but no NMEA arrives, and `--location-disable-gps-unmanaged` fails with `Unknown mobile equipment error: 505`. Restarting ModemManager fixes it: `sudo systemctl restart ModemManager`, then `sudo mmcli -m any --location-enable-gps-unmanaged`. Cellular drops for about 20 s during the restart.
+
+### Ways to turn the cellular radio off
 
 | Control | Command | What it does |
 |---|---|---|
 | NetworkManager WWAN radio | `nmcli radio wwan off` | NetworkManager tells ModemManager to disable the modem. |
-| ModemManager | `sudo mmcli -m any --disable` | Turns the modem's radio off, as airplane mode does. The modem stays on USB. |
-| rfkill | `sudo rfkill block 1` | Drives the `W_DISABLE1#` line, a hardware signal to the module. |
-
-Not yet tested: what the module turns off for each `W_DISABLE` line, and whether ModemManager notices an rfkill block.
+| ModemManager | `sudo mmcli -m any --disable` | Puts the modem in low-power mode. The modem stays on USB. |
+| rfkill | `sudo rfkill block 1` | Drives `W_DISABLE1#` LOW. The module cannot turn the radio on until the line is released. NetworkManager also disables WWAN. |
 
 ## Multiple modems
 
@@ -658,7 +680,7 @@ Measured on 2026-10-20 with Vodafone UK, indoors, the same weak signal as the US
 ### Known issues
 
 - **ModemManager lists the modem twice.** One entry uses PCIe (MBIM, `wwan0at0`), the other the leftover USB AT ports. Both control the same radio. Ignoring the USB ports in PCIe mode needs a udev rule, which has not been tested yet.
-- **Check which interface is the default route.** On the test unit the cellular connection had `ipv4.route-metric 100`, lower than Ethernet's 101, so all traffic went over cellular, in USB and PCIe mode alike. Raise `ipv4.route-metric` on the cellular connection if Ethernet or Wi-Fi should stay preferred.
+- **Check which interface is the default route.** On the test unit the cellular connection had `ipv4.route-metric 100`, lower than Ethernet's 101, so all traffic went over cellular, in USB and PCIe mode alike. Any cellular test then also cuts off the SSH session. Set the cellular route metric higher, for example `sudo nmcli connection modify cellular-vodafone-uk ipv4.route-metric 700 ipv6.route-metric 700`, then restart the connection with `nmcli connection down` and `up`. `nmcli device reapply` left the interface without an IP address on the test unit.
 
 ## Software stack
 
